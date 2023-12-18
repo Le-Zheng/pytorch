@@ -12,6 +12,7 @@ from ..pattern_matcher import Arg, CallFunction, filter_nodes, KeywordArg, ListO
 from ..utils import pad_listlike
 from .freezing_patterns import register_freezing_graph_pattern
 from .post_grad import register_lowering_pattern
+# from .mkldnn_fusion import _to_float, _to_bf16
 
 aten = torch.ops.aten
 prims = torch.ops.prims
@@ -118,8 +119,27 @@ dequantize_qconv_pt2e_pattern = CallFunction(
 )
 
 
-def get_qlinear(users=1):
+def _to_float(input_call, users=1):
     return CallFunction(
+        prims.convert_element_type.default,
+        input_call,
+        KeywordArg("to_float"),
+        _users=users,
+    )
+
+
+def _to_bf16(input_call):
+    return CallFunction(
+        prims.convert_element_type.default,
+        input_call,
+        KeywordArg("to_bf16"),
+        _users=1,
+    )
+
+
+def get_qlinear(users=1, is_bf16=False):
+    # print("is_bf16", is_bf16)
+    computation_call = CallFunction(
         torch.ops.onednn.qlinear_pointwise.default,
         KeywordArg("x"),
         KeywordArg("x_scale"),
@@ -136,6 +156,7 @@ def get_qlinear(users=1):
         KeywordArg("postop_algorithm"),
         _users=users,
     )
+    return _to_float(computation_call, users=users) if is_bf16 else computation_call
 
 
 dequantize_accum_pattern = CallFunction(
@@ -225,7 +246,7 @@ def generate_pattern_with_output_quant(computation_call, dtype=torch.float32):
         ),
         KeywordArg("o_dtype"),
     )
-    return quantized_op_output_pattern_pt2e
+    return _to_bf16(quantized_op_output_pattern_pt2e) if dtype == torch.bfloat16 else quantized_op_output_pattern_pt2e
 
 
 def _check_node_kwarg_arg_value(check_node, kwarg_name, args_index, expected_value):
@@ -329,6 +350,7 @@ def _register_quantized_conv_lowering(
 
 
 def _is_valid_quantized_linear_optimization_pattern(output_dtype):
+    print("########enter _is_valid_quantized_linear_optimization_pattern ############")
     def fn(match):
         if output_dtype is not None:
             # Only keep matched pattern with same output_dtype
@@ -339,7 +361,10 @@ def _is_valid_quantized_linear_optimization_pattern(output_dtype):
                 qlinear_node_after_weight_prepack, "output_dtype", 9, output_dtype
             )
         return True
-
+    if fn:
+        print("True", "\n")
+    else:
+        print("False", "\n")
     return fn
 
 
@@ -567,6 +592,8 @@ def _register_quantization_unary_fusion():
                 original_pattern_output_dtype=original_pattern_output_dtype,
             )
 
+        is_bf16 = True if original_pattern_output_dtype == torch.bfloat16 else False
+
         # QLinear
         # Priority 1 to match: QLinear Unary pattern with int8 output
         linear_unary_replace_patterns = {
@@ -579,7 +606,7 @@ def _register_quantization_unary_fusion():
                 dtype=original_pattern_output_dtype,
             ),
             UnaryAttr("gelu", [], "none"): generate_pattern_with_output_quant(
-                _gelu_fusion_erf(get_qlinear(2)),
+                _gelu_fusion_erf(get_qlinear(2, is_bf16)),
                 dtype=original_pattern_output_dtype,
             ),
             UnaryAttr("gelu", [], "tanh"): generate_pattern_with_output_quant(
@@ -587,8 +614,11 @@ def _register_quantization_unary_fusion():
                 dtype=original_pattern_output_dtype,
             ),
         }
+        print("dtype:", original_pattern_output_dtype)
 
         for unary_attr, patterns in linear_unary_replace_patterns.items():
+            print("unary_attr", unary_attr)
+            print("patterns", patterns)
             _register_quantized_linear_lowering(
                 patterns,
                 1,  # pass_number

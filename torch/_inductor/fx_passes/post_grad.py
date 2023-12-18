@@ -84,7 +84,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
 
         group_batch_fusion_passes(gm.graph, pre_grad=False)
         remove_noop_ops(gm.graph)
-
+        print("gm.graph before post grad fusion is: {}".format(gm.graph), flush=True)
         for patterns in pass_patterns:
             patterns.apply(gm.graph)
         if is_inference:
