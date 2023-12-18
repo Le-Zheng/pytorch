@@ -156,7 +156,7 @@ def get_qlinear(users=1, is_bf16=False):
         KeywordArg("postop_algorithm"),
         _users=users,
     )
-    return _to_float(computation_call, users=users) if is_bf16 else computation_call
+    return _to_float(computation_call, users=2) if is_bf16 else computation_call
 
 
 dequantize_accum_pattern = CallFunction(
@@ -246,7 +246,7 @@ def generate_pattern_with_output_quant(computation_call, dtype=torch.float32):
         ),
         KeywordArg("o_dtype"),
     )
-    return _to_bf16(quantized_op_output_pattern_pt2e) if dtype == torch.bfloat16 else quantized_op_output_pattern_pt2e
+    return quantized_op_output_pattern_pt2e
 
 
 def _check_node_kwarg_arg_value(check_node, kwarg_name, args_index, expected_value):
@@ -606,11 +606,11 @@ def _register_quantization_unary_fusion():
                 dtype=original_pattern_output_dtype,
             ),
             UnaryAttr("gelu", [], "none"): generate_pattern_with_output_quant(
-                _gelu_fusion_erf(get_qlinear(2, is_bf16)),
-                dtype=original_pattern_output_dtype,
+                _gelu_fusion_erf(get_qlinear(1 if is_bf16 else 2, is_bf16)),
+                dtype=torch.float32,
             ),
             UnaryAttr("gelu", [], "tanh"): generate_pattern_with_output_quant(
-                _gelu_fusion_tanh(get_qlinear(4)),
+                _gelu_fusion_tanh(get_qlinear(4 if is_bf16 else 2, is_bf16)),
                 dtype=original_pattern_output_dtype,
             ),
         }
@@ -633,8 +633,8 @@ def _register_quantization_unary_fusion():
             UnaryAttr("relu", [], ""): generate_pattern_with_unary(
                 get_qlinear(1), aten.relu.default
             ),
-            UnaryAttr("gelu", [], "none"): _gelu_fusion_erf(get_qlinear(2)),
-            UnaryAttr("gelu", [], "tanh"): _gelu_fusion_tanh(get_qlinear(4)),
+            UnaryAttr("gelu", [], "none"): _gelu_fusion_erf(get_qlinear(1 if is_bf16 else 2, is_bf16)),
+            UnaryAttr("gelu", [], "tanh"): _gelu_fusion_tanh(get_qlinear(4 if is_bf16 else 2, is_bf16)),
         }
 
         for unary_attr, patterns in linear_unary_replace_float_out_patterns.items():

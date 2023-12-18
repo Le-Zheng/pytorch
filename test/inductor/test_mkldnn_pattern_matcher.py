@@ -1084,7 +1084,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 return self.unary_fn2(self.linear2(tmp))
 
         bias_list = [True, False]
-        post_op_algorithms = ["none"]
+        post_op_algorithms = ["none", "tanh"]
         cases = itertools.product(bias_list, post_op_algorithms)
         for bias, post_op_algo in cases:
             mod = M(bias, post_op_algo).eval()
